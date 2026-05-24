@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using MathNet.Numerics.IntegralTransforms;
 
 namespace Project3
 {
@@ -54,7 +56,7 @@ namespace Project3
 
                 if (riffChunkId != "RIFF" || riffFormat != "WAVE")
                 {
-                    MessageBox.Show("Wybrany plik nie jest prawidłowym plikiem WAV.");
+                    MessageBox.Show("Not a correct WAV file.");
                     return;
                 }
 
@@ -101,12 +103,12 @@ namespace Project3
 
                 if (!fmtFound || !dataFound)
                 {
-                    MessageBox.Show("Nie znaleziono wymaganych sekcji (fmt/data). Plik może być uszkodzony.");
+                    MessageBox.Show("Error");
                     return;
                 }
                 if (bitsPerSample != 16)
                 {
-                    MessageBox.Show("Ten program obsługuje tylko pliki 16-bitowe.");
+                    MessageBox.Show("Error");
                     return;
                 }
 
@@ -128,6 +130,175 @@ namespace Project3
                 }
                 frameSamples = (int)(frameSize * samplePerSecond);
                 shiftSamples = (int)(shift * samplePerSecond);
+            }
+        }
+
+        public List<double> CalculateVolume()
+        {
+            List<double> res = new List<double>();
+            for (int i = 0; i < leftChannel.Count; i += shiftSamples)
+            {
+                double startTime = (double)i / samplePerSecond;
+                double endTime = (double)(i + shiftSamples) / samplePerSecond;
+
+                var spectrum = CalculateSpectrum(startTime, endTime);
+                double temporaryRes = 0;
+                for (int j = 0; j < spectrum.Count; j++)
+                {
+                    temporaryRes += spectrum[j].linearMag * spectrum[j].linearMag;
+                }
+                var energy = temporaryRes / spectrum.Count;
+                double volumeDb = 10 * Math.Log10(energy > 0 ? energy : 1e-10);
+                res.Add(volumeDb);
+            }
+            return res;
+        }
+
+        public void TrimSilence(double thresholdOffsetDb = 25.0, int marginFrames = 5)
+        {
+            var volumes = CalculateVolume();
+            if (volumes.Count == 0) return;
+
+            double maxVol = volumes.Max();
+            double threshold = maxVol - thresholdOffsetDb;
+
+            int startFrame = 0;
+            while (startFrame < volumes.Count && volumes[startFrame] < threshold)
+                startFrame++;
+
+            int endFrame = volumes.Count - 1;
+            while (endFrame >= 0 && volumes[endFrame] < threshold)
+                endFrame--;
+
+            if (startFrame >= endFrame) return;
+
+            startFrame = Math.Max(0, startFrame - marginFrames);
+            endFrame = Math.Min(volumes.Count - 1, endFrame + marginFrames);
+
+            int startSample = startFrame * shiftSamples;
+            int endSample = Math.Min(leftChannel.Count, (endFrame * shiftSamples) + frameSamples);
+
+            if (startSample < endSample)
+            {
+                leftChannel = leftChannel.GetRange(startSample, endSample - startSample);
+                if (rightChannel.Count > 0)
+                {
+                    rightChannel = rightChannel.GetRange(startSample, endSample - startSample);
+                }
+            }
+        }
+
+        public List<(double freq, double mag, double linearMag)> CalculateSpectrum(double startTime, double endTime)
+        {
+            int startSample = Math.Max(0, (int)(startTime * samplePerSecond));
+            int endSample = Math.Min(leftChannel.Count, (int)(endTime * samplePerSecond));
+
+            int frameLength = endSample - startSample;
+            if (frameLength <= 0) return new List<(double, double, double)>();
+
+            int fftSize = (int)Math.Pow(2, Math.Ceiling(Math.Log(frameLength, 2)));
+            if (fftSize < 2) fftSize = 2;
+
+            Complex[] complexSignal = new Complex[fftSize];
+
+            double[] window = MathNet.Numerics.Window.Hann(fftSize);
+
+            for (int i = 0; i < fftSize; i++)
+            {
+                if (i < frameLength)
+                {
+                    double rawSample = leftChannel[startSample + i] / 32768.0;
+                    double windowedSample = rawSample * window[i];
+                    complexSignal[i] = new Complex(windowedSample, 0);
+                }
+                else
+                {
+                    complexSignal[i] = new Complex(0, 0);
+                }
+            }
+
+            Fourier.Forward(complexSignal, FourierOptions.Matlab);
+
+            List<(double Frequency, double Magnitude, double linearMag)> spectrum = new List<(double, double, double)>();
+
+            for (int i = 0; i < fftSize / 2; i++)
+            {
+                double freq = (double)i * samplePerSecond / fftSize;
+                double mag = complexSignal[i].Magnitude / (fftSize / 2.0);
+                double magDb = 20 * Math.Log10(mag > 0 ? mag : 1e-10);
+
+                spectrum.Add((freq, magDb, mag));
+            }
+
+            return spectrum;
+        }
+
+        public List<double[]> CalculateAllFramesSpectrum(double? customFrameSize = null, double? customShift = null)
+        {
+            double activeFrameSize = customFrameSize ?? this.frameSize;
+            double activeShift = customShift ?? this.shift;
+
+            int activeFrameSamples = (int)(activeFrameSize * samplePerSecond);
+            int activeShiftSamples = (int)(activeShift * samplePerSecond);
+
+            List<double[]> allSpectra = new List<double[]>();
+
+            for (int i = 0; i <= leftChannel.Count - activeFrameSamples; i += activeShiftSamples)
+            {
+                double startTime = (double)i / samplePerSecond;
+                double endTime = startTime + activeFrameSize;
+
+                var spectrum = CalculateSpectrum(startTime, endTime);
+
+                if (spectrum.Count == 0) continue;
+
+                double[] magnitudesDb = spectrum.Select(s => s.mag).ToArray();
+                allSpectra.Add(magnitudesDb);
+            }
+
+            return allSpectra;
+        }
+
+        public void NormalizeAudio()
+        {
+            if (leftChannel.Count == 0) return;
+
+            int maxAmp = 0;
+            foreach (short sample in leftChannel)
+            {
+                int absSample = Math.Abs((int)sample); 
+                if (absSample > maxAmp)
+                {
+                    maxAmp = absSample;
+                }
+            }
+
+            if (maxAmp == 0 || maxAmp >= 32767) return;
+
+            double ratio = 32767.0 / maxAmp;
+
+            for (int i = 0; i < leftChannel.Count; i++)
+            {
+                leftChannel[i] = (short)(leftChannel[i] * ratio);
+            }
+
+            if (rightChannel.Count > 0)
+            {
+                maxAmp = 0;
+                foreach (short sample in rightChannel)
+                {
+                    int absSample = Math.Abs((int)sample);
+                    if (absSample > maxAmp) maxAmp = absSample;
+                }
+
+                if (maxAmp > 0 && maxAmp < 32767)
+                {
+                    ratio = 32767.0 / maxAmp;
+                    for (int i = 0; i < rightChannel.Count; i++)
+                    {
+                        rightChannel[i] = (short)(rightChannel[i] * ratio);
+                    }
+                }
             }
         }
     }
