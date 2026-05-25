@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Project3
@@ -15,6 +15,7 @@ namespace Project3
         public double[]? OptimalPathY { get; private set; }
 
         public double TotalDistance { get; private set; }
+        public double NormalizedDistance { get; private set; }
 
         public DtwAnalyzer(List<double[]> framesX, List<double[]> framesY)
         {
@@ -52,11 +53,11 @@ namespace Project3
             {
                 for (int x = 1; x < nx; x++)
                 {
-                    double minPrev = Math.Min(GlobalCostMatrix[y - 1, x - 1],
-                                     Math.Min(GlobalCostMatrix[y, x - 1],
-                                              GlobalCostMatrix[y - 1, x]));
+                    double costDiag = GlobalCostMatrix[y - 1, x - 1] + 2.0 * LocalDistanceMatrix[y, x];
+                    double costLeft = GlobalCostMatrix[y, x - 1] + LocalDistanceMatrix[y, x];
+                    double costDown = GlobalCostMatrix[y - 1, x] + LocalDistanceMatrix[y, x];
 
-                    GlobalCostMatrix[y, x] = LocalDistanceMatrix[y, x] + minPrev;
+                    GlobalCostMatrix[y, x] = Math.Min(costDiag, Math.Min(costLeft, costDown));
                 }
             }
 
@@ -94,13 +95,17 @@ namespace Project3
 
             OptimalPathX = pathX.ToArray();
             OptimalPathY = pathY.ToArray();
+            
+            // Normalizacja uwzględniająca wagi kroków (2 dla skosu, 1 dla prostej) daje sumę wag nx + ny
+            NormalizedDistance = TotalDistance / (nx + ny);
         }
 
         private double CalculateEuclideanDistance(double[] vecA, double[] vecB)
         {
             double sum = 0;
             int length = Math.Min(vecA.Length, vecB.Length);
-            for (int i = 0; i < length; i++)
+            // Zaczynamy od i = 1, pomijając indeks 0 (C0), który mocno zależy od całkowitej głośności sygnału
+            for (int i = 1; i < length; i++)
             {
                 double diff = vecA[i] - vecB[i];
                 sum += diff * diff;
