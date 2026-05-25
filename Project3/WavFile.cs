@@ -154,7 +154,7 @@ namespace Project3
             return res;
         }
 
-        public void TrimSilence(double thresholdOffsetDb = 25.0, int marginFrames = 5)
+        public void TrimSilence(double thresholdOffsetDb = 25.0, int marginFrames = 15)
         {
             var volumes = CalculateVolume();
             if (volumes.Count == 0) return;
@@ -184,6 +184,24 @@ namespace Project3
                 if (rightChannel.Count > 0)
                 {
                     rightChannel = rightChannel.GetRange(startSample, endSample - startSample);
+                }
+            }
+        }
+
+        public void ApplyPreEmphasis(double alpha = 0.97)
+        {
+            if (leftChannel.Count < 2) return;
+
+            for (int i = leftChannel.Count - 1; i > 0; i--)
+            {
+                leftChannel[i] = (short)(leftChannel[i] - alpha * leftChannel[i - 1]);
+            }
+
+            if (rightChannel.Count > 1)
+            {
+                for (int i = rightChannel.Count - 1; i > 0; i--)
+                {
+                    rightChannel[i] = (short)(rightChannel[i] - alpha * rightChannel[i - 1]);
                 }
             }
         }

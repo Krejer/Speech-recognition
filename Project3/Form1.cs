@@ -1,28 +1,26 @@
-using Microsoft.VisualBasic.ApplicationServices;
-using NAudio.Wave;
 using NAudio.Wave;
 using ScottPlot;
-using ScottPlot.Colormaps;
 using ScottPlot.WinForms;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Windows.Forms;
 
 namespace Project3
 {
-    public enum DisplayMode
-    {
-        Signal,
-        DTW
-    }
+    public enum DisplayMode { Signal, DTW }
 
     public partial class Form1 : Form
     {
-        WavFile? wavFile1 = null;
-        WavFile? wavFile2 = null;
-        DtwAnalyzer? dtwAnalyzer = null;
+        private string? wavPath1 = null;
+        private string? wavPath2 = null;
+
+        private WavFile? wavFile1 = null;
+        private WavFile? wavFile2 = null;
+        private DtwAnalyzer? dtwAnalyzer = null;
 
         private DisplayMode currentMode = DisplayMode.Signal;
 
@@ -49,11 +47,11 @@ namespace Project3
         {
             tlpDtw = new TableLayoutPanel
             {
-                Location = new Point(233, 24),
-                Size = new Size(1118, 852),
+                Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 2,
-                Visible = false
+                Visible = false,
+                BackColor = System.Drawing.Color.White
             };
 
             tlpDtw.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
@@ -69,42 +67,52 @@ namespace Project3
             tlpDtw.Controls.Add(plotHeatmap, 1, 0);
             tlpDtw.Controls.Add(plotBottom, 1, 1);
 
-            Controls.Add(tlpDtw);
+            panelPlot.Controls.Add(tlpDtw);
         }
+
+        private void ApplyPreprocessing(WavFile wav)
+        {
+            if (chkPreemphasis.Checked) wav.ApplyPreEmphasis();
+            if (chkNormalize.Checked) wav.NormalizeAudio();
+            if (chkTrimSilence.Checked) wav.TrimSilence(thresholdOffsetDb: 25.0, marginFrames: 15);
+        }
+
+        private List<double[]> ExtractFeatures(WavFile wav)
+        {
+            double frameSizeSec = 256.0 / wav.samplePerSecond;
+            double shiftSec = 128.0 / wav.samplePerSecond;
+
+            if (rbMFCC.Checked)
+                return wav.CalculateMFCC(frameSizeSec, shiftSec);
+            else
+                return wav.CalculateAllFramesSpectrum(frameSizeSec, shiftSec);
+        }
+
+        private DtwMetric GetSelectedMetric()
+        {
+            return rbCosine.Checked ? DtwMetric.Cosine : DtwMetric.Euclidean;
+        }
+
         private void btnRecord_Click(object sender, EventArgs e)
         {
-            if (!isRecording)
-            {
-                StartRecording();
-            }
-            else
-            {
-                StopRecording();
-            }
+            if (!isRecording) StartRecording();
+            else StopRecording();
         }
 
         private void StartRecording()
         {
             waveIn = new WaveInEvent();
             waveIn.WaveFormat = new WaveFormat(44100, 16, 1);
-
             writer = new WaveFileWriter(tempRecordFile, waveIn.WaveFormat);
-
-            waveIn.DataAvailable += (s, a) =>
-            {
-                writer.Write(a.Buffer, 0, a.BytesRecorded);
-            };
+            waveIn.DataAvailable += (s, a) => writer.Write(a.Buffer, 0, a.BytesRecorded);
 
             waveIn.RecordingStopped += (s, a) =>
             {
-                writer?.Dispose();
-                writer = null;
-                waveIn?.Dispose();
-                waveIn = null;
+                writer?.Dispose(); writer = null;
+                waveIn?.Dispose(); waveIn = null;
 
-                wavFile1 = new WavFile(tempRecordFile);
-                ResetAnalyzer();
-                UpdatePlot();
+                wavPath1 = tempRecordFile;
+                btnShowSignal_Click(s, a);
             };
 
             waveIn.StartRecording();
@@ -123,64 +131,50 @@ namespace Project3
 
         private void btnLoad1_Click(object sender, EventArgs e)
         {
-            wavFile1 = LoadWavFile();
-            ResetAnalyzer();
-            currentMode = DisplayMode.Signal;
-            UpdatePlot();
+            wavPath1 = SelectWavFilePath();
+            if (wavPath1 != null) btnShowSignal_Click(sender, e);
         }
 
         private void btnLoad2_Click(object sender, EventArgs e)
         {
-            wavFile2 = LoadWavFile();
-            ResetAnalyzer();
-            currentMode = DisplayMode.Signal;
-            UpdatePlot();
+            wavPath2 = SelectWavFilePath();
+            if (wavPath2 != null) btnShowSignal_Click(sender, e);
         }
 
-        private WavFile? LoadWavFile()
+        private string? SelectWavFilePath()
         {
-            OpenFileDialog ofd = new OpenFileDialog();
-            ofd.Filter = "WAV files (*.wav)|*.wav";
-            if (ofd.ShowDialog() == DialogResult.OK)
-            {
-                return new WavFile(ofd.FileName);
-            }
-            return null;
-        }
-
-        private void ResetAnalyzer()
-        {
-            dtwAnalyzer = null;
+            OpenFileDialog ofd = new OpenFileDialog { Filter = "WAV files (*.wav)|*.wav" };
+            return ofd.ShowDialog() == DialogResult.OK ? ofd.FileName : null;
         }
 
         private void btnShowSignal_Click(object sender, EventArgs e)
         {
+            if (wavPath1 != null) { wavFile1 = new WavFile(wavPath1); ApplyPreprocessing(wavFile1); }
+            if (wavPath2 != null) { wavFile2 = new WavFile(wavPath2); ApplyPreprocessing(wavFile2); }
+
             currentMode = DisplayMode.Signal;
             UpdatePlot();
         }
 
         private void btnShowDTW_Click(object sender, EventArgs e)
         {
-            if (wavFile1 == null || wavFile2 == null)
+            if (wavPath1 == null || wavPath2 == null)
             {
-                MessageBox.Show("Missing WAV files");
+                MessageBox.Show("Najpierw wczytaj oba pliki (Wav 1 i Wav 2)!");
                 return;
             }
 
-            if (dtwAnalyzer == null)
-            {
+            wavFile1 = new WavFile(wavPath1);
+            wavFile2 = new WavFile(wavPath2);
 
-                double frameSizeSec = 256.0 / wavFile1.samplePerSecond;
-                double shiftSec = 128.0 / wavFile1.samplePerSecond;
+            ApplyPreprocessing(wavFile1);
+            ApplyPreprocessing(wavFile2);
 
-                var frames1 = wavFile1.CalculateMFCC(frameSizeSec, shiftSec);
-                var frames2 = wavFile2.CalculateMFCC(frameSizeSec, shiftSec);
+            var frames1 = ExtractFeatures(wavFile1);
+            var frames2 = ExtractFeatures(wavFile2);
 
-                dtwAnalyzer = new DtwAnalyzer(frames1, frames2);
-                dtwAnalyzer.CalculateDtw();
-
-                System.Diagnostics.Debug.WriteLine($"DTW cost: {dtwAnalyzer.TotalDistance}");
-            }
+            dtwAnalyzer = new DtwAnalyzer(frames1, frames2, GetSelectedMetric());
+            dtwAnalyzer.CalculateDtw();
 
             currentMode = DisplayMode.DTW;
             UpdatePlot();
@@ -238,7 +232,6 @@ namespace Project3
 
             var hm = plotHeatmap.Plot.Add.Heatmap(dtwAnalyzer.LocalDistanceMatrix);
             hm.Colormap = new ScottPlot.Colormaps.Grayscale().Reversed();
-
             hm.Extent = new ScottPlot.CoordinateRect(0, samplesX, 0, samplesY);
 
             if (dtwAnalyzer.OptimalPathX != null && dtwAnalyzer.OptimalPathY != null)
@@ -273,73 +266,39 @@ namespace Project3
             plotLeft.Refresh();
         }
 
-        private void buttonNorm_Click(object sender, EventArgs e)
+        private void btnGenerateDB_Click(object sender, EventArgs e)
         {
-            if (wavFile1 == null || wavFile2 == null)
-            {
-                MessageBox.Show("Missing WAV files");
-                return;
-            }
-            wavFile1.NormalizeAudio();
-            wavFile2.NormalizeAudio();
-            UpdatePlot();
-        }
+            DialogResult dialogResult = MessageBox.Show("Generowanie bazy potrwa chwilę i nadpisze poprzednią.\nUpewnij się, że opcje ekstrakcji (MFCC/FFT) są wybrane poprawnie!\nCzy chcesz kontynuować?", "Aktualizacja Bazy", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (dialogResult == DialogResult.No) return;
 
-        private void buttonTrim_Click(object sender, EventArgs e)
-        {
-            if (wavFile1 == null || wavFile2 == null)
-            {
-                MessageBox.Show("Missing WAV files");
-                return;
-            }
-            wavFile1.TrimSilence();
-            wavFile2.TrimSilence();
-            UpdatePlot();
-        }
-
-        private void button1_Click(object sender, EventArgs e)
-        {
             var baza = new Data();
-            
-            // Fix path to use the relative project directory
             string bazaNagranDir = Path.Combine(nagraniaPath, "Baza_nagran");
+            if (!Directory.Exists(bazaNagranDir)) { MessageBox.Show("Folder z bazą nie istnieje!"); return; }
+
             string[] plikiWav = Directory.GetFiles(bazaNagranDir, "*.wav", SearchOption.AllDirectories);
 
             foreach (string plik in plikiWav)
             {
-                // Extract word from file name, assuming format "WORD_1.wav" or similar
                 string fileName = Path.GetFileNameWithoutExtension(plik);
-                string etykietaSlowa = fileName;
-                if (fileName.Contains("_"))
-                {
-                    etykietaSlowa = fileName.Substring(0, fileName.LastIndexOf('_'));
-                }
+                string etykietaSlowa = fileName.Contains("_") ? fileName.Substring(0, fileName.IndexOf('_')) : fileName;
 
                 var wav = new WavFile(plik);
-                wav.TrimSilence(); // Oczyszczamy ciszę przed analizą!
-                wav.NormalizeAudio(); // Wyrównujemy głośność!
-
-                // Parametry ramek takie, jak masz obecnie ustawione w Form1
-                double frameSizeSec = 256.0 / wav.samplePerSecond;
-                double shiftSec = 128.0 / wav.samplePerSecond;
-
-                // Obliczamy wektory dla całego słowa (teraz używa MFCC)
-                var cechy = wav.CalculateMFCC(frameSizeSec, shiftSec);
+                ApplyPreprocessing(wav); 
+                var cechy = ExtractFeatures(wav);
 
                 baza.patterns.Add(new WzorzecNagrania
                 {
                     Number = etykietaSlowa,
                     FilePath = plik,
-                    FFT = cechy
+                    FFT = cechy 
                 });
             }
 
-            // Zapis do JSON
             string jsonString = JsonSerializer.Serialize(baza, new JsonSerializerOptions { WriteIndented = true });
-            string bazaJsonPath = Path.Combine(nagraniaPath, "baza");
-            File.WriteAllText(bazaJsonPath, jsonString);
-            MessageBox.Show("Baza została wygenerowana pomyślnie!");
+            File.WriteAllText(Path.Combine(nagraniaPath, "baza"), jsonString);
 
+            data = baza;
+            MessageBox.Show("Baza została wygenerowana pomyślnie!", "Gotowe");
         }
 
         private void LoadData()
@@ -350,52 +309,63 @@ namespace Project3
                 string jsonString = File.ReadAllText(bazaJsonPath);
                 data = JsonSerializer.Deserialize<Data>(jsonString);
             }
-            else
-            {
-                MessageBox.Show("Nie znaleziono pliku baza. Wygeneruj bazę najpierw!");
-            }
         }
 
-        private void RecognizeButton_Click(object sender, EventArgs e)
+        private void btnRecognize_Click(object sender, EventArgs e)
         {
-            if (wavFile1 == null)
+            if (wavPath1 == null)
             {
-                MessageBox.Show("Najpierw nagraj lub wczytaj plik do rozpoznania!");
+                MessageBox.Show("Najpierw nagraj lub wczytaj plik 1 do rozpoznania!");
                 return;
             }
 
-            if (data == null) 
+            if (data == null || data.patterns.Count == 0)
             {
-                LoadData(); // Wczytujemy, jeśli jeszcze tego nie zrobiliśmy
-                if (data == null) return; // Jeśli nadal null, to znaczy że plik nie istnieje (komunikat został już pokazany)
+                LoadData();
+                if (data == null || data.patterns.Count == 0)
+                {
+                    MessageBox.Show("Baza jest pusta. Kliknij 'Generate Database' przed klasyfikacją.");
+                    return;
+                }
             }
 
-            // 1. Przygotowujemy nagranie testowe
-            wavFile1.TrimSilence();
-            wavFile1.NormalizeAudio();
-            double frameSizeSec = 256.0 / wavFile1.samplePerSecond;
-            double shiftSec = 128.0 / wavFile1.samplePerSecond;
-            var cechyTestowe = wavFile1.CalculateMFCC(frameSizeSec, shiftSec);
+            wavFile1 = new WavFile(wavPath1);
+            ApplyPreprocessing(wavFile1);
+            var cechyTestowe = ExtractFeatures(wavFile1);
 
-            // 2. Szukamy najbliższego dopasowania
             double minimalnyKoszt = double.MaxValue;
             string rozpoznaneSlowo = "Nie rozpoznano";
+            WzorzecNagrania? bestMatch = null;
+            DtwMetric metric = GetSelectedMetric();
 
             foreach (var wzorzec in data.patterns)
             {
-                // Używamy Twojej klasy DtwAnalyzer do porównania mikrofonu z wzorcem w bazie
-                var dtw = new DtwAnalyzer(cechyTestowe, wzorzec.FFT);
+                var dtw = new DtwAnalyzer(cechyTestowe, wzorzec.FFT, metric);
                 dtw.CalculateDtw();
 
                 if (dtw.NormalizedDistance < minimalnyKoszt)
                 {
                     minimalnyKoszt = dtw.NormalizedDistance;
                     rozpoznaneSlowo = wzorzec.Number;
+                    bestMatch = wzorzec;
                 }
             }
 
-            // 3. Wyświetlamy wynik na ekranie
-            MessageBox.Show($"Rozpoznano słowo: {rozpoznaneSlowo}\nNajmniejszy znormalizowany koszt DTW: {minimalnyKoszt:F4}");
+            MessageBox.Show($"Rozpoznano słowo: {rozpoznaneSlowo}\nNajmniejszy znormalizowany koszt DTW: {minimalnyKoszt:F4}", "Wynik DTW", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            if (bestMatch != null && File.Exists(bestMatch.FilePath))
+            {
+                wavPath2 = bestMatch.FilePath;
+                wavFile2 = new WavFile(wavPath2);
+                ApplyPreprocessing(wavFile2);
+
+                var cechyWzorca = ExtractFeatures(wavFile2);
+                dtwAnalyzer = new DtwAnalyzer(cechyTestowe, cechyWzorca, metric);
+                dtwAnalyzer.CalculateDtw();
+
+                currentMode = DisplayMode.DTW;
+                UpdatePlot();
+            }
         }
     }
 }

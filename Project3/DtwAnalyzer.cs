@@ -3,6 +3,12 @@ using System.Collections.Generic;
 
 namespace Project3
 {
+    public enum DtwMetric
+    {
+        Euclidean,
+        Cosine
+    }
+
     public class DtwAnalyzer
     {
         public List<double[]> FramesX { get; private set; }
@@ -17,10 +23,13 @@ namespace Project3
         public double TotalDistance { get; private set; }
         public double NormalizedDistance { get; private set; }
 
-        public DtwAnalyzer(List<double[]> framesX, List<double[]> framesY)
+        private DtwMetric _metric;
+
+        public DtwAnalyzer(List<double[]> framesX, List<double[]> framesY, DtwMetric metric = DtwMetric.Euclidean)
         {
             FramesX = framesX ?? throw new ArgumentNullException(nameof(framesX));
             FramesY = framesY ?? throw new ArgumentNullException(nameof(framesY));
+            _metric = metric;
         }
 
         public void CalculateDtw()
@@ -37,7 +46,9 @@ namespace Project3
             {
                 for (int x = 0; x < nx; x++)
                 {
-                    LocalDistanceMatrix[y, x] = CalculateEuclideanDistance(FramesX[x], FramesY[y]);
+                    LocalDistanceMatrix[y, x] = _metric == DtwMetric.Euclidean
+                        ? CalculateEuclideanDistance(FramesX[x], FramesY[y])
+                        : CalculateCosineDistance(FramesX[x], FramesY[y]);
                 }
             }
 
@@ -95,8 +106,7 @@ namespace Project3
 
             OptimalPathX = pathX.ToArray();
             OptimalPathY = pathY.ToArray();
-            
-            // Normalizacja uwzględniająca wagi kroków (2 dla skosu, 1 dla prostej) daje sumę wag nx + ny
+
             NormalizedDistance = TotalDistance / (nx + ny);
         }
 
@@ -104,13 +114,33 @@ namespace Project3
         {
             double sum = 0;
             int length = Math.Min(vecA.Length, vecB.Length);
-            // Zaczynamy od i = 1, pomijając indeks 0 (C0), który mocno zależy od całkowitej głośności sygnału
+            // Zaczynamy od i = 1, pomijając indeks 0 (C0 dla MFCC, stała (DC) dla FFT)
             for (int i = 1; i < length; i++)
             {
                 double diff = vecA[i] - vecB[i];
                 sum += diff * diff;
             }
             return Math.Sqrt(sum);
+        }
+
+        private double CalculateCosineDistance(double[] vecA, double[] vecB)
+        {
+            double dotProduct = 0;
+            double normA = 0;
+            double normB = 0;
+            int length = Math.Min(vecA.Length, vecB.Length);
+
+            for (int i = 1; i < length; i++)
+            {
+                dotProduct += vecA[i] * vecB[i];
+                normA += vecA[i] * vecA[i];
+                normB += vecB[i] * vecB[i];
+            }
+
+            if (normA == 0 || normB == 0) return 1.0;
+
+            double cosineSimilarity = dotProduct / (Math.Sqrt(normA) * Math.Sqrt(normB));
+            return 1.0 - cosineSimilarity;
         }
     }
 }
