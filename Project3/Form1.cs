@@ -353,7 +353,15 @@ namespace Project3
 
             string rozpoznaneSlowo = najlepszaGrupa.Key;
             double minimalnyKoszt = najlepszaGrupa.Min(w => w.Koszt);
-            WzorzecNagrania bestMatch = najlepszaGrupa.OrderBy(w => w.Koszt).First().Wzorzec;
+            WzorzecNagrania? bestMatch = najlepszaGrupa.OrderBy(w => w.Koszt).First().Wzorzec;
+
+            double dtwThreshold = rbCosine.Checked ? 0.29 : 18.0;
+
+            if (minimalnyKoszt > dtwThreshold)
+            {
+                rozpoznaneSlowo = "Nie rozpoznano (słowo spoza bazy)";
+                bestMatch = null;
+            }
 
             MessageBox.Show($"Rozpoznano słowo: {rozpoznaneSlowo}\nNajmniejszy znormalizowany koszt DTW: {minimalnyKoszt:F4}", "Wynik DTW", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
