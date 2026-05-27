@@ -72,15 +72,15 @@ namespace Project3
 
         private void ApplyPreprocessing(WavFile wav)
         {
-            if (chkPreemphasis.Checked) wav.ApplyPreEmphasis();
             if (chkNormalize.Checked) wav.NormalizeAudio();
             if (chkTrimSilence.Checked) wav.TrimSilence(thresholdOffsetDb: 25.0, marginFrames: 15);
+            if (chkPreemphasis.Checked) wav.ApplyPreEmphasis();
         }
 
         private List<double[]> ExtractFeatures(WavFile wav)
         {
-            double frameSizeSec = 256.0 / wav.samplePerSecond;
-            double shiftSec = 128.0 / wav.samplePerSecond;
+            double frameSizeSec = 0.025;
+            double shiftSec = 0.010;
 
             if (rbMFCC.Checked)
                 return wav.CalculateMFCC(frameSizeSec, shiftSec);
@@ -333,23 +333,27 @@ namespace Project3
             ApplyPreprocessing(wavFile1);
             var cechyTestowe = ExtractFeatures(wavFile1);
 
-            double minimalnyKoszt = double.MaxValue;
-            string rozpoznaneSlowo = "Nie rozpoznano";
-            WzorzecNagrania? bestMatch = null;
+            var wyniki = new List<(string Klasa, double Koszt, WzorzecNagrania Wzorzec)>();
             DtwMetric metric = GetSelectedMetric();
 
             foreach (var wzorzec in data.patterns)
             {
                 var dtw = new DtwAnalyzer(cechyTestowe, wzorzec.FFT, metric);
                 dtw.CalculateDtw();
-
-                if (dtw.NormalizedDistance < minimalnyKoszt)
-                {
-                    minimalnyKoszt = dtw.NormalizedDistance;
-                    rozpoznaneSlowo = wzorzec.Number;
-                    bestMatch = wzorzec;
-                }
+                wyniki.Add((wzorzec.Number, dtw.NormalizedDistance, wzorzec));
             }
+
+            int k = 3;
+            var topK = wyniki.OrderBy(w => w.Koszt).Take(k).ToList();
+
+            var najlepszaGrupa = topK.GroupBy(w => w.Klasa)
+                                     .OrderByDescending(g => g.Count())
+                                     .ThenBy(g => g.Min(w => w.Koszt)) 
+                                     .First();
+
+            string rozpoznaneSlowo = najlepszaGrupa.Key;
+            double minimalnyKoszt = najlepszaGrupa.Min(w => w.Koszt);
+            WzorzecNagrania bestMatch = najlepszaGrupa.OrderBy(w => w.Koszt).First().Wzorzec;
 
             MessageBox.Show($"Rozpoznano słowo: {rozpoznaneSlowo}\nNajmniejszy znormalizowany koszt DTW: {minimalnyKoszt:F4}", "Wynik DTW", MessageBoxButtons.OK, MessageBoxIcon.Information);
 

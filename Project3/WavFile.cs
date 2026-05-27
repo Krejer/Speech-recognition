@@ -279,15 +279,13 @@ namespace Project3
 
         public List<double[]> CalculateMFCC(double? customFrameSize = null, double? customShift = null)
         {
-            // Otrzymujemy widma czasowo-częstotliwościowe (tylko magnituda liniowa) z ramkowania
             var spectra = CalculateAllFramesSpectrum(customFrameSize, customShift);
             
             int numFilters = 26;
             int numCoeffs = 13;
             double minFreq = 0;
-            double maxFreq = samplePerSecond / 2.0;
+            double maxFreq = 8000.0;
             
-            // Konwersja na mel-skalę
             double minMel = 2595.0 * Math.Log10(1.0 + minFreq / 700.0);
             double maxMel = 2595.0 * Math.Log10(1.0 + maxFreq / 700.0);
             
@@ -309,7 +307,6 @@ namespace Project3
             if (fftSize < 2) fftSize = 2;
             int numBins = fftSize / 2;
             
-            // Mapowanie częstotliwości na biny FFT
             int[] binPoints = new int[numFilters + 2];
             for (int i = 0; i < hzPoints.Length; i++)
             {
@@ -323,7 +320,6 @@ namespace Project3
             {
                 double[] filterbankEnergies = new double[numFilters];
                 
-                // Filtry trójkątne Mela
                 for (int i = 1; i <= numFilters; i++)
                 {
                     double energy = 0;
@@ -346,7 +342,6 @@ namespace Project3
                     logEnergies[i] = Math.Log(filterbankEnergies[i] < 1e-10 ? 1e-10 : filterbankEnergies[i]);
                 }
                 
-                // DCT do uzyskania MFCC
                 double[] mfcc = new double[numCoeffs];
                 for (int i = 0; i < numCoeffs; i++)
                 {
@@ -360,7 +355,6 @@ namespace Project3
                 mfccFrames.Add(mfcc);
             }
             
-            // Cepstral Mean Subtraction (CMS) - usuwa stały szum tła i różnice między mikrofonami
             if (mfccFrames.Count > 0)
             {
                 double[] means = new double[numCoeffs];

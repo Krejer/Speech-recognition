@@ -114,7 +114,6 @@ namespace Project3
         {
             double sum = 0;
             int length = Math.Min(vecA.Length, vecB.Length);
-            // Zaczynamy od i = 1, pomijając indeks 0 (C0 dla MFCC, stała (DC) dla FFT)
             for (int i = 1; i < length; i++)
             {
                 double diff = vecA[i] - vecB[i];
